@@ -170,7 +170,8 @@
     </div>
 
     <script>
-        // --- Setting ---
+        // --- 設定 ---
+        // 告知取得用のURL
         const ANNOUNCEMENT_API_URL = 'https://script.google.com/macros/s/AKfycbxigVan3WWQXD5gsbgEBXWOZchmWjRODRxU5iZfqQUQEbCify-vxSXIN1OEPFS3H69DpA/exec'; 
 
         const CITIES = [
@@ -183,7 +184,7 @@
 
         let currentNews = [];
 
-        // --- Functions ---
+        // --- 各種機能 ---
         
         function updateDateTime() {
             const now = new Date();
@@ -195,7 +196,6 @@
             const container = document.getElementById('announcement-content');
             try {
                 const response = await fetch(ANNOUNCEMENT_API_URL);
-                if (!response.ok) throw new Error();
                 const data = await response.json();
                 if (data && data.content) {
                     container.innerHTML = `<p class="text-slate-800 font-bold text-lg leading-relaxed">${data.content}</p>`;
@@ -218,60 +218,68 @@
         async function fetchAllWeather() {
             const grid = document.getElementById('weather-grid');
             try {
-                // Amedas for Current Temperature
+                // アメダス最新データの取得
                 const amedasRes = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_timeseries.json");
+                if (!amedasRes.ok) throw new Error("Amedas load failed");
                 const amedasData = await amedasRes.json();
 
                 const weatherCards = [];
 
                 for (const city of CITIES) {
-                    // Forecast for Icon and Max/Min
-                    const forecastRes = await fetch(`https://www.jma.go.jp/bosai/forecast/data/forecast/${city.code}.json`);
-                    const forecastData = await forecastRes.json();
-                    
-                    const weatherInfo = forecastData[0].timeSeries[0].areas[0];
-                    const tempSeries = forecastData[0].timeSeries[2] ? forecastData[0].timeSeries[2].areas[0].temps : null;
-                    
-                    let maxT = "--", minT = "--";
-                    
-                    if (tempSeries) {
-                        // Logic: JMA typically returns [min, max] or just [max] depending on the time of day
-                        // We check the labels or just take the extremes from today's data
-                        const tempsToday = tempSeries.map(t => parseFloat(t)).filter(t => !isNaN(t));
-                        if (tempsToday.length >= 2) {
-                            minT = Math.min(...tempsToday);
-                            maxT = Math.max(...tempsToday);
-                        } else if (tempsToday.length === 1) {
-                            maxT = tempsToday[0];
+                    try {
+                        // 天気予報の取得
+                        const forecastRes = await fetch(`https://www.jma.go.jp/bosai/forecast/data/forecast/${city.code}.json`);
+                        if (!forecastRes.ok) throw new Error("Forecast load failed");
+                        const forecastData = await forecastRes.json();
+                        
+                        const weatherInfo = forecastData[0].timeSeries[0].areas[0];
+                        
+                        // 気温情報の抽出 (timeSeries[2] が気温データ)
+                        let maxT = "--", minT = "--";
+                        const tempSeriesData = forecastData[0].timeSeries.find(s => s.areas[0].temps);
+                        
+                        if (tempSeriesData) {
+                            const temps = tempSeriesData.areas[0].temps.map(t => parseFloat(t)).filter(t => !isNaN(t));
+                            if (temps.length >= 2) {
+                                minT = Math.min(...temps);
+                                maxT = Math.max(...temps);
+                            } else if (temps.length === 1) {
+                                maxT = temps[0];
+                            }
                         }
-                    }
 
-                    // Current temp from Amedas
-                    let curT = "--";
-                    const station = amedasData[city.stId];
-                    if (station && station.temp) {
-                        // Get the last non-null value in the array
-                        const validTemps = station.temp.filter(v => v !== null);
-                        if (validTemps.length > 0) {
-                            curT = validTemps[validTemps.length - 1];
+                        // アメダスから現在の気温を取得
+                        let curT = "--";
+                        const station = amedasData[city.stId];
+                        if (station && station.temp) {
+                            const validTemps = station.temp.filter(v => v !== null);
+                            if (validTemps.length > 0) {
+                                curT = validTemps[validTemps.length - 1];
+                            }
                         }
-                    }
 
-                    weatherCards.push({
-                        name: city.name,
-                        icon: getWeatherIcon(weatherInfo.weatherCodes[0]),
-                        text: weatherInfo.weathers[0].split('　')[0],
-                        current: curT,
-                        max: maxT,
-                        min: minT
-                    });
+                        weatherCards.push({
+                            name: city.name,
+                            icon: getWeatherIcon(weatherInfo.weatherCodes[0]),
+                            text: weatherInfo.weathers[0].split('　')[0],
+                            current: curT,
+                            max: maxT,
+                            min: minT
+                        });
+                    } catch (cityErr) {
+                        console.error(`Error fetching for ${city.name}:`, cityErr);
+                        weatherCards.push({
+                            name: city.name, icon: "fa-exclamation-triangle", text: "取得エラー",
+                            current: "--", max: "--", min: "--"
+                        });
+                    }
                 }
 
                 grid.innerHTML = weatherCards.map(data => `
                     <div class="weather-grid-item bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center">
                         <span class="text-sm font-bold text-slate-600 mb-1">${data.name}</span>
                         <i class="fas ${data.icon} text-3xl my-2"></i>
-                        <span class="text-[10px] font-medium text-slate-400 mb-2 truncate w-full">${data.text}</span>
+                        <span class="text-[10px] font-medium text-slate-400 mb-2 truncate w-full px-1">${data.text}</span>
                         
                         <div class="flex flex-col items-center w-full mt-1 border-t border-slate-50 pt-2">
                             <div class="text-2xl font-black text-slate-800 tracking-tighter mb-1">
@@ -286,8 +294,13 @@
                 `).join('');
 
             } catch (error) {
-                console.error(error);
-                grid.innerHTML = `<p class="col-span-full text-red-400 text-xs py-4">天気情報を更新できませんでした</p>`;
+                console.error("Global Weather Fetch Error:", error);
+                grid.innerHTML = `
+                    <div class="col-span-full py-8 text-center">
+                        <p class="text-red-400 text-sm mb-2 font-bold">天気情報を更新できませんでした</p>
+                        <p class="text-slate-400 text-xs">時間を置いてから右上の更新ボタンを押してください</p>
+                    </div>
+                `;
             }
         }
 
