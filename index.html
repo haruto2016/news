@@ -40,6 +40,7 @@
             100% { background-position: -200% 0; }
         }
 
+        .temp-now { color: #1e293b; }
         .temp-max { color: #ef4444; }
         .temp-min { color: #3b82f6; }
 
@@ -118,11 +119,11 @@
                     </div>
                     
                     <div id="weather-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 text-center">
-                        <div class="loading-shimmer h-32 rounded-2xl"></div>
-                        <div class="loading-shimmer h-32 rounded-2xl"></div>
-                        <div class="loading-shimmer h-32 rounded-2xl"></div>
-                        <div class="loading-shimmer h-32 rounded-2xl"></div>
-                        <div class="loading-shimmer h-32 rounded-2xl"></div>
+                        <div class="loading-shimmer h-40 rounded-2xl"></div>
+                        <div class="loading-shimmer h-40 rounded-2xl"></div>
+                        <div class="loading-shimmer h-40 rounded-2xl"></div>
+                        <div class="loading-shimmer h-40 rounded-2xl"></div>
+                        <div class="loading-shimmer h-40 rounded-2xl"></div>
                     </div>
                 </div>
             </section>
@@ -174,15 +175,14 @@
 
     <script>
         // --- 設定 ---
-        // 新しいAPI URLを適用しました
         const ANNOUNCEMENT_API_URL = 'https://script.google.com/macros/s/AKfycbxigVan3WWQXD5gsbgEBXWOZchmWjRODRxU5iZfqQUQEbCify-vxSXIN1OEPFS3H69DpA/exec'; 
 
         const CITIES = [
-            { name: "札幌", code: "016000" },
-            { name: "東京", code: "130000" },
-            { name: "名古屋", code: "230000" },
-            { name: "大阪", code: "270000" },
-            { name: "福岡", code: "400000" }
+            { name: "札幌", code: "016000", office: "016000" },
+            { name: "東京", code: "130000", office: "130000" },
+            { name: "名古屋", code: "230000", office: "230000" },
+            { name: "大阪", code: "270000", office: "270000" },
+            { name: "福岡", code: "400000", office: "400000" }
         ];
 
         let currentNews = [];
@@ -209,7 +209,12 @@
                 });
                 
                 clearTimeout(timeoutId);
-                if (!response.ok) throw new Error('Response not OK');
+                
+                // Content-TypeがJSONかチェック
+                const contentType = response.headers.get("content-type");
+                if (!response.ok || !contentType || !contentType.includes("application/json")) {
+                    throw new Error('Not a valid JSON response');
+                }
                 
                 const data = await response.json();
                 if (data && data.content && data.content.trim() !== "") {
@@ -218,7 +223,8 @@
                     container.innerHTML = `<p class="text-slate-500 italic text-sm">新しい告知はありません</p>`;
                 }
             } catch (error) {
-                container.innerHTML = `<p class="text-slate-400 text-xs italic">告知を読み込めませんでした（GASの公開設定を「全員」にしてください）</p>`;
+                console.warn("Announcement Fetch Error:", error);
+                container.innerHTML = `<p class="text-slate-400 text-xs italic">告知を読み込めませんでした（GASのデプロイ設定を「全員」にしてください）</p>`;
             }
         }
 
@@ -233,36 +239,74 @@
         async function fetchAllWeather() {
             const grid = document.getElementById('weather-grid');
             try {
+                // 最新の全国アメダスデータを取得
+                const amedasRes = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_timeseries.json");
+                const amedasData = await amedasRes.json();
+                
+                // 主要都市の観測点IDマップ（アメダス用）
+                const cityAmedasMap = {
+                    "札幌": "14163",
+                    "東京": "44132",
+                    "名古屋": "51106",
+                    "大阪": "62078",
+                    "福岡": "82182"
+                };
+
                 const weatherData = [];
                 for (const city of CITIES) {
+                    // 予報データの取得
                     const forecastRes = await fetch(`https://www.jma.go.jp/bosai/forecast/data/forecast/${city.code}.json`);
                     const forecastData = await forecastRes.json();
+                    
                     const areaForecast = forecastData[0].timeSeries[0].areas[0];
                     let maxTemp = "--", minTemp = "--";
+                    
                     if (forecastData[0].timeSeries[2]) {
                         const temps = forecastData[0].timeSeries[2].areas[0].temps;
-                        minTemp = temps[0] || "--"; maxTemp = temps[1] || "--";
+                        minTemp = temps[0] || "--"; 
+                        maxTemp = temps[1] || "--";
                     }
+
+                    // 現在の気温をアメダスから取得
+                    let currentTemp = "--";
+                    const stationId = cityAmedasMap[city.name];
+                    if (stationId && amedasData[stationId]) {
+                        const obs = amedasData[stationId];
+                        const tempRecords = obs.temp;
+                        if (tempRecords && tempRecords.length > 0) {
+                            currentTemp = tempRecords[tempRecords.length - 1];
+                        }
+                    }
+
                     weatherData.push({
                         name: city.name,
                         icon: getWeatherIcon(areaForecast.weatherCodes[0]),
                         text: areaForecast.weathers[0].split('　')[0],
-                        max: maxTemp, min: minTemp
+                        current: currentTemp,
+                        max: maxTemp, 
+                        min: minTemp
                     });
                 }
+
                 grid.innerHTML = weatherData.map(data => `
                     <div class="weather-grid-item bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center">
-                        <span class="text-sm font-bold text-slate-600 mb-2">${data.name}</span>
+                        <span class="text-sm font-bold text-slate-600 mb-1">${data.name}</span>
                         <i class="fas ${data.icon} text-3xl my-2"></i>
                         <span class="text-xs font-medium text-slate-500 mb-2">${data.text}</span>
-                        <div class="flex gap-3 text-sm font-bold">
-                            <span class="temp-max">${data.max}°</span>
-                            <span class="text-slate-200">|</span>
-                            <span class="temp-min">${data.min}°</span>
+                        
+                        <div class="flex flex-col items-center w-full mt-1 border-t border-slate-50 pt-2">
+                            <div class="text-2xl font-black text-slate-800 tracking-tighter mb-1">
+                                ${data.current}<span class="text-sm font-normal ml-0.5">°C</span>
+                            </div>
+                            <div class="flex gap-2 text-[10px] font-bold">
+                                <span class="temp-max bg-red-50 px-1.5 py-0.5 rounded text-red-600">高 ${data.max}°</span>
+                                <span class="temp-min bg-blue-50 px-1.5 py-0.5 rounded text-blue-600">低 ${data.min}°</span>
+                            </div>
                         </div>
                     </div>
                 `).join('');
             } catch (error) {
+                console.error("Weather Fetch Error:", error);
                 grid.innerHTML = `<p class="col-span-full text-red-400 text-xs py-4">天気を取得できませんでした</p>`;
             }
         }
@@ -291,6 +335,7 @@
                     }).join('');
                 }
             } catch (error) {
+                console.error("News Fetch Error:", error);
                 newsList.innerHTML = `<p class="text-red-400 text-xs py-4">ニュースを読み込めませんでした</p>`;
             }
         }
@@ -326,8 +371,7 @@
             updateDateTime();
             refreshAll();
             setInterval(updateDateTime, 30000);
-            // 30分おきに自動更新
-            setInterval(refreshAll, 1800000);
+            setInterval(refreshAll, 600000);
         };
     </script>
 </body>
